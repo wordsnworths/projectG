@@ -4,7 +4,7 @@ import pandas as pd
 
 DATA_DIR = "data"
 DATA_FILE = os.path.join(DATA_DIR, "hsn_master.json")
-# We will look for this CSV if the JSON doesn't exist or is broken
+# This is the file you uploaded
 CSV_SOURCE = "hsn.csv"
 
 class DataManager:
@@ -25,53 +25,78 @@ class DataManager:
             if os.path.exists(CSV_SOURCE):
                 print(f"Found {CSV_SOURCE}. Converting to master JSON...")
                 try:
-                    # Read CSV, skipping the first row (metadata) to find headers on row 2
-                    # If your CSV is standard, remove 'header=1'. Based on your file, keep 'header=1'.
+                    # Read CSV. We use header=1 because your file has a date/rate in the first row.
                     df = pd.read_csv(CSV_SOURCE, header=1)
                     
-                    # Clean column names
-                    df.columns = [c.strip() for c in df.columns]
+                    # --- CRITICAL FIX: Normalize columns to lowercase ---
+                    # This converts 'HSN' -> 'hsn' and 'DESCRIPTION' -> 'description'
+                    df.columns = df.columns.str.strip().str.lower()
                     
-                    # Add missing gst_rate if it doesn't exist
+                    # Handle missing 'gst_rate' column
                     if 'gst_rate' not in df.columns:
-                        df['gst_rate'] = 18 # Defaulting to 18% based on your file metadata
+                        # If your file has metadata like "0.18" in the first row, we can default to 18
+                        df['gst_rate'] = 18 
                     
+                    # Ensure numeric types
+                    df['gst_rate'] = pd.to_numeric(df['gst_rate'], errors='coerce').fillna(0)
+                    
+                    # Fill NaN descriptions
+                    if 'description' in df.columns:
+                        df['description'] = df['description'].fillna("")
+
                     # Save as JSON
                     self.save_data(df)
+                    print("Successfully created master database from CSV.")
+                    
                 except Exception as e:
                     print(f"Error importing CSV: {e}")
-                    # Create empty fallback if CSV fails
-                    with open(DATA_FILE, 'w') as f:
-                        json.dump([], f)
+                    # Create empty fallback
+                    self.create_empty_file()
             else:
-                # Create empty fallback if no CSV found
-                with open(DATA_FILE, 'w') as f:
-                    json.dump([], f)
+                print(f"CSV source {CSV_SOURCE} not found. Creating empty db.")
+                self.create_empty_file()
+
+    def create_empty_file(self):
+        with open(DATA_FILE, 'w') as f:
+            json.dump([], f)
 
     def load_data(self):
         """
-        Loads data from JSON and performs self-healing if columns are missing.
+        Loads data from JSON and ensures columns are correct.
         """
         try:
             with open(DATA_FILE, 'r') as f:
                 data = json.load(f)
-                df = pd.DataFrame(data)
                 
-                # SELF-HEALING: Fix missing 'gst_rate' column error
-                if not df.empty and 'gst_rate' not in df.columns:
-                    print("Fixing missing 'gst_rate' column...")
-                    df['gst_rate'] = 18
-                    self.save_data(df) # Save the fix
-                    
-                return df
+            if not data:
+                return pd.DataFrame(columns=['hsn', 'description', 'gst_rate'])
+
+            df = pd.DataFrame(data)
+            
+            # --- SELF-HEALING: Standardize columns if loaded from bad JSON ---
+            df.columns = df.columns.str.strip().str.lower()
+            
+            # Fix missing columns if they don't exist
+            required_cols = ['hsn', 'description', 'gst_rate']
+            for col in required_cols:
+                if col not in df.columns:
+                    if col == 'gst_rate':
+                        df[col] = 18
+                    else:
+                        df[col] = ""
+                        
+            return df
         except Exception as e:
             print(f"Error loading data: {e}")
-            return pd.DataFrame()
+            return pd.DataFrame(columns=['hsn', 'description', 'gst_rate'])
 
     def save_data(self, df):
         """
         Saves the DataFrame to the master JSON file.
         """
+        # Ensure we always save with lowercase keys
+        df.columns = df.columns.str.strip().str.lower()
+        
         data = df.to_dict(orient='records')
         with open(DATA_FILE, 'w') as f:
             json.dump(data, f, indent=4)
@@ -82,9 +107,9 @@ class DataManager:
         Returns HSN codes filtered by GST rate.
         """
         if self.hsn_data.empty:
-            return pd.DataFrame()
+            return pd.DataFrame(columns=['hsn', 'description', 'gst_rate'])
         
-        # Ensure gst_rate is numeric for comparison
+        # Ensure types are correct for comparison
         self.hsn_data['gst_rate'] = pd.to_numeric(self.hsn_data['gst_rate'], errors='coerce').fillna(0)
         
         return self.hsn_data[self.hsn_data['gst_rate'] == rate].copy()
@@ -93,4 +118,6 @@ class DataManager:
         """
         Returns all HSN data.
         """
+        if self.hsn_data.empty:
+             return pd.DataFrame(columns=['hsn', 'description', 'gst_rate'])
         return self.hsn_data.copy()
