@@ -4,7 +4,8 @@ import pandas as pd
 
 DATA_DIR = "data"
 DATA_FILE = os.path.join(DATA_DIR, "hsn_master.json")
-# This is the file you uploaded
+DEFAULT_FILE = os.path.join(DATA_DIR, "hsn_defaults.json")
+# We keep this just as a fallback, but we will prioritize JSON
 CSV_SOURCE = "hsn.csv"
 
 class DataManager:
@@ -15,76 +16,69 @@ class DataManager:
     def ensure_data_exists(self):
         """
         Ensures the data directory and master JSON file exist.
-        If JSON is missing, it tries to create it from 'hsn.csv'.
         """
         if not os.path.exists(DATA_DIR):
             os.makedirs(DATA_DIR)
         
-        # If master JSON doesn't exist, try to create it from CSV
+        # If master JSON doesn't exist, try to populate it
         if not os.path.exists(DATA_FILE):
-            if os.path.exists(CSV_SOURCE):
-                print(f"Found {CSV_SOURCE}. Converting to master JSON...")
+            # 1. Try Default JSON first
+            if os.path.exists(DEFAULT_FILE):
                 try:
-                    # Read CSV. We use header=1 because your file has a date/rate in the first row.
-                    df = pd.read_csv(CSV_SOURCE, header=1)
-                    
-                    # --- CRITICAL FIX: Normalize columns to lowercase ---
-                    # This converts 'HSN' -> 'hsn' and 'DESCRIPTION' -> 'description'
-                    df.columns = df.columns.str.strip().str.lower()
-                    
-                    # Handle missing 'gst_rate' column
-                    if 'gst_rate' not in df.columns:
-                        # If your file has metadata like "0.18" in the first row, we can default to 18
-                        df['gst_rate'] = 18 
-                    
-                    # Ensure numeric types
-                    df['gst_rate'] = pd.to_numeric(df['gst_rate'], errors='coerce').fillna(0)
-                    
-                    # Fill NaN descriptions
-                    if 'description' in df.columns:
-                        df['description'] = df['description'].fillna("")
-
-                    # Save as JSON
-                    self.save_data(df)
-                    print("Successfully created master database from CSV.")
-                    
+                    with open(DEFAULT_FILE, 'r') as f:
+                        defaults = json.load(f)
+                    with open(DATA_FILE, 'w') as f:
+                        json.dump(defaults, f, indent=4)
+                    print(f"Initialized data from {DEFAULT_FILE}")
+                    return
                 except Exception as e:
-                    print(f"Error importing CSV: {e}")
-                    # Create empty fallback
-                    self.create_empty_file()
-            else:
-                print(f"CSV source {CSV_SOURCE} not found. Creating empty db.")
-                self.create_empty_file()
+                    print(f"Error loading defaults: {e}")
 
-    def create_empty_file(self):
-        with open(DATA_FILE, 'w') as f:
-            json.dump([], f)
+            # 2. Try CSV second (as recovery)
+            if os.path.exists(CSV_SOURCE):
+                try:
+                    df = pd.read_csv(CSV_SOURCE, header=1) # Assuming header on row 2
+                    # Normalize columns immediately
+                    df.columns = df.columns.str.strip().str.lower()
+                    if 'gst_rate' not in df.columns: df['gst_rate'] = 18
+                    
+                    data = df.to_dict(orient='records')
+                    with open(DATA_FILE, 'w') as f:
+                        json.dump(data, f, indent=4)
+                    print(f"Initialized data from {CSV_SOURCE}")
+                except:
+                    pass
+            
+            # 3. If all else fails, create empty file
+            if not os.path.exists(DATA_FILE):
+                with open(DATA_FILE, 'w') as f:
+                    json.dump([], f)
 
     def load_data(self):
         """
-        Loads data from JSON and ensures columns are correct.
+        Loads data from JSON and normalizes keys to ensure app compatibility.
         """
         try:
             with open(DATA_FILE, 'r') as f:
                 data = json.load(f)
-                
+            
             if not data:
                 return pd.DataFrame(columns=['hsn', 'description', 'gst_rate'])
 
             df = pd.DataFrame(data)
             
-            # --- SELF-HEALING: Standardize columns if loaded from bad JSON ---
+            # --- CRITICAL FIX: Normalize columns to lowercase ---
+            # This fixes the mismatch if JSON has "HSN" but app wants "hsn"
             df.columns = df.columns.str.strip().str.lower()
             
-            # Fix missing columns if they don't exist
-            required_cols = ['hsn', 'description', 'gst_rate']
-            for col in required_cols:
-                if col not in df.columns:
-                    if col == 'gst_rate':
-                        df[col] = 18
-                    else:
-                        df[col] = ""
-                        
+            # Ensure required columns exist
+            if 'gst_rate' not in df.columns:
+                df['gst_rate'] = 18
+            
+            # Convert NaN to empty strings for text fields
+            if 'description' in df.columns:
+                df['description'] = df['description'].fillna("")
+
             return df
         except Exception as e:
             print(f"Error loading data: {e}")
