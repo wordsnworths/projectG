@@ -576,14 +576,6 @@
         "max_price": 1200
     },
     {
-        "hsn": "4902",
-        "description": "Newspapers, journals, periodicals",
-        "gst_rate": 0.0,
-        "default_weight": 5.0,
-        "min_price": 10.0,
-        "max_price": 500
-    },
-    {
         "hsn": "4903",
         "description": "Children's picture, drawing or colouring books",
         "gst_rate": 0.0,
@@ -615,4 +607,5 @@
         "min_price": NaN,
         "max_price": 1
     }
+
 ]
