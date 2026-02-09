@@ -23,7 +23,7 @@ class DataManager:
         if os.path.exists(DATA_FILE):
             return
 
-        # 1. Try defaults JSON
+        # 1️⃣ Try defaults JSON
         if os.path.exists(DEFAULT_FILE):
             try:
                 with open(DEFAULT_FILE, "r") as f:
@@ -34,7 +34,7 @@ class DataManager:
             except Exception:
                 pass
 
-        # 2. Try CSV import
+        # 2️⃣ Try CSV import
         if os.path.exists(CSV_SOURCE):
             try:
                 meta_df = pd.read_csv(CSV_SOURCE, header=None, nrows=1)
@@ -66,7 +66,7 @@ class DataManager:
             except Exception as e:
                 print("CSV bootstrap failed:", e)
 
-        # 3. Fallback empty
+        # 3️⃣ Fallback empty
         with open(DATA_FILE, "w") as f:
             json.dump([], f)
 
@@ -95,32 +95,21 @@ class DataManager:
             # Realism columns
             if 'weight' not in df.columns:
                 df['weight'] = 5
-            
-            # Numeric cleanup for calculations
-            cols_to_numeric = ['min_price', 'max_price', 'gst_rate', 'weight']
-            for col in cols_to_numeric:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-
             if 'min_price' not in df.columns:
                 df['min_price'] = 50.0
-            else:
-                 df['min_price'] = df['min_price'].fillna(50.0)
-
             if 'max_price' not in df.columns:
                 df['max_price'] = 500.0
-            else:
-                 df['max_price'] = df['max_price'].fillna(500.0)
-
-            # --- CRITICAL FIX FOR KEYERROR ---
-            # Ensure typical_price exists
             if 'typical_price' not in df.columns:
                 df['typical_price'] = (df['min_price'] + df['max_price']) / 2
-            
-            # Ensure it is numeric
-            df['typical_price'] = pd.to_numeric(df['typical_price'], errors='coerce')
-            
-            # Fill NaNs in typical_price
+
+            # Clean numeric fields
+            for col in ['weight', 'min_price', 'max_price', 'typical_price', 'gst_rate']:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+
+            # Fill NaNs sensibly
+            df['weight'] = df['weight'].fillna(5)
+            df['min_price'] = df['min_price'].fillna(50.0)
+            df['max_price'] = df['max_price'].fillna(df['min_price'] * 5)
             df['typical_price'] = df['typical_price'].fillna(
                 (df['min_price'] + df['max_price']) / 2
             )
